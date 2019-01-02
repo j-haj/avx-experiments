@@ -1,6 +1,6 @@
-CC := g++-8
+CC := g++
 STD := -std=c++17
-CFLAG := -O3
+CFLAG := -O1 -mavx2
 
 all: main.cpp
-	$(CC) $(STD) $(CFLAGS) main.cpp -o run
+	$(CC) $(STD) $(CFLAG) main.cpp -o run

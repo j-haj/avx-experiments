@@ -7,12 +7,18 @@
 #include <vector>
 #include <x86intrin.h>
 
+#include <boost/align.hpp>
+
+template <typename T, std::size_t Alignment = 32>
+using aligned_vector = std::vector<T,
+				   boost::alignment::aligned_allocator<T, Alignment>>;
+
 template <typename T>
-std::vector<T> random_vector(std::size_t n) {
+aligned_vector<T> random_vector(std::size_t n) {
   std::random_device rd;
   std::mt19937_64 gen(rd());
   std::uniform_real_distribution<T> dist(-1, 1);
-  std::vector<T> v(n);
+  aligned_vector<T> v(n);
   for (std::size_t i = 0; i < n; ++i) {
     v[i] = dist(gen);
   }
@@ -20,7 +26,7 @@ std::vector<T> random_vector(std::size_t n) {
 }
 
 template <typename T>
-double distance(const std::vector<T>& x, const std::vector<T>& y) {
+double distance(const aligned_vector<T>& x, const aligned_vector<T>& y) {
   double sum = 0.0;
   for (std::size_t i = 0; i < x.size(); ++i) {
     auto d = x[i] - y[i];
@@ -30,18 +36,31 @@ double distance(const std::vector<T>& x, const std::vector<T>& y) {
 }
 
 template <typename T>
-void saxpy(T, std::vector<T>&, const std::vector<T>&, const std::vector<T>&);
+void saxpy(T, aligned_vector<T>&, const aligned_vector<T>&, const aligned_vector<T>&);
 
 template <typename T>
-void avx_saxpy(T s, std::vector<T>& a, std::vector<T>& x,
-	       std::vector<T>& y) {
+void avx_saxpy(T s, aligned_vector<T>& a, const aligned_vector<T>& x,
+	       const aligned_vector<T>& y) {
   T* ap = a.data();
-  T* xp = x.data();
-  T* yp = y.data();
-  if (std::is_same<T, double>::value) {
+  const T* xp = x.data();
+  const T* yp = y.data();
+  if constexpr (std::is_same<T, double>::value) {
     // -- DOUBLE --
 #ifdef __AVX2__
     // AVX2 has 256 bit ops, which gives us 4 doubles
+    const int n_doubles = 4;
+    std::size_t rem = a.size() % 4;
+    std::size_t n = (a.size() - rem) / 4;
+    for (std::size_t i = 0; i < n; ++i) {
+      __m256d sm = _mm256_set_pd(s, s, s, s);
+      __m256d am = _mm256_load_pd(ap + n_doubles * i);
+      am = _mm256_mul_pd(am, sm);
+      __m256d xm = _mm256_load_pd(xp + n_doubles * i);
+      am = _mm256_mul_pd(am, xm);
+      __m256d ym = _mm256_load_pd(yp + n_doubles * i);
+      am = _mm256_add_pd(am, ym);
+      _mm256_store_pd(ap + n_doubles * i, am);
+    }
 #else
     // AVX has 128 bit ops, which gives use 2 doubles
     const int n_doubles = 2;
@@ -57,38 +76,60 @@ void avx_saxpy(T s, std::vector<T>& a, std::vector<T>& x,
       am = _mm_add_pd(am, ym);
       _mm_store_pd(ap + n_doubles * i, am);
     }
+#endif
+    // Compiler should be able to unrull this...
     for (std::size_t i = a.size() - rem; i < a.size(); ++i) {
       a[i] = a[i] * s * x[i] + y[i];
     }
-#endif
-  } else if (std::is_same<T, float>::value) {
+  } else {
     // -- FLOAT	--				      
 #ifdef __AVX2__
     // AVX2 has 256 bit ops, which gives us 8 floats
+    const int n_floats = 8;
+    std::size_t rem = a.size() % 8;
+    std::size_t n = (a.size() - rem) / 8;
+    for (std::size_t i = 0; i < n; ++i) {
+      __m256 sm = _mm256_set_ps(s, s, s, s, s, s, s, s);
+      __m256 am = _mm256_load_ps(ap + n_floats * i);
+      am = _mm256_mul_ps(am, sm);
+      __m256 xm = _mm256_load_ps(xp + n_floats * i);
+      am = _mm256_mul_ps(am, xm);
+      __m256 ym = _mm256_load_ps(yp + n_floats * i);
+      am = _mm256_add_ps(am, ym);
+      _mm256_store_ps(ap + n_floats * i, am);
+    }
 #else
     // AVX has 128 bit ops, which gives us 4 floats
     const int n_floats = 4;
     std::size_t rem = a.size() % 4;
     std::size_t n = (a.size() - rem) / 4;
     for (std::size_t i = 0; i < n; ++i) {
-
+      __m128 sm = _mm_set_ps(s, s, s, s);
+      __m128 am = _mm_load_ps(ap + n_floats * i);
+      am = _mm_mul_ps(am, sm);
+      __m128 xm = _mm_load_ps(xp + n_floats * i);
+      am = _mm_mul_ps(am, xm);
+      __m128 ym = _mm_load_ps(yp + n_floats * i);
+      am = _mm_add_ps(am, ym);
+      _mm_store_ps(ap + n_floats * i, am);
     }
 #endif
-  } else {
-    saxpy(s, a, x, y);
+    for (std::size_t i = a.size() - rem; i < a.size(); ++i) {
+      a[i] = a[i] * s * x[i] + y[i];
+    }
   }
 }
 
 template <typename T>
-void saxpy(T s, std::vector<T>& a, const std::vector<T>& x,
-	   const std::vector<T>& y) {
+void saxpy(T s, aligned_vector<T>& a, const aligned_vector<T>& x,
+	   const aligned_vector<T>& y) {
   for (std::size_t i = 0; i < a.size(); ++i) {
     a[i] = s * a[i] * x[i] + y[i];
   }
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
+std::ostream& operator<<(std::ostream& os, const aligned_vector<T>& v) {
   os << "{ ";
   for (const auto& x : v) {
     os << x << ' ';
@@ -98,23 +139,29 @@ std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
 }
 
 int main() {
+#ifdef __AVX2__
+  std::cout << "AVX2 available\n";
+#else
+  std::cout << "Using AVX\n";
+#endif
   using t = double;
   const auto dim = 500;
   const auto n = 10000;
   const t s = 3.0;
-  std::vector<std::vector<t>> a1(n);
+  std::vector<aligned_vector<t>> a1(n);
   for (auto i = 0; i < n; ++i) {
     a1[i] = random_vector<t>(dim);
   }
-  std::vector<std::vector<t>> a2(a1);
+  std::vector<aligned_vector<t>> a2(a1);
 
-  std::vector<std::vector<t>> xs(n);
-  std::vector<std::vector<t>> ys(n);
+  std::vector<aligned_vector<t>> xs(n);
+  std::vector<aligned_vector<t>> ys(n);
   for (auto i = 0; i < n; ++i) {
     xs[i] = random_vector<t>(dim);
     ys[i] = random_vector<t>(dim);
   }
 
+  std::cout << "Starting AVX saxpy\n";
   auto start = std::chrono::steady_clock::now();
   for (auto i = 0; i < n; ++i) {
     avx_saxpy(s, a1[i], xs[i], ys[i]);
