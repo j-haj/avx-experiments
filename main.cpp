@@ -14,11 +14,11 @@ using aligned_vector = std::vector<T,
 				   boost::alignment::aligned_allocator<T, Alignment>>;
 
 template <typename T>
-aligned_vector<T> random_vector(std::size_t n) {
+std::vector<T> random_vector(std::size_t n) {
   std::random_device rd;
   std::mt19937_64 gen(rd());
   std::uniform_real_distribution<T> dist(-1, 1);
-  aligned_vector<T> v(n);
+  std::vector<T> v(n);
   for (std::size_t i = 0; i < n; ++i) {
     v[i] = dist(gen);
   }
@@ -26,7 +26,7 @@ aligned_vector<T> random_vector(std::size_t n) {
 }
 
 template <typename T>
-double distance(const aligned_vector<T>& x, const aligned_vector<T>& y) {
+double distance(const std::vector<T>& x, const std::vector<T>& y) {
   double sum = 0.0;
   for (std::size_t i = 0; i < x.size(); ++i) {
     auto d = x[i] - y[i];
@@ -36,11 +36,11 @@ double distance(const aligned_vector<T>& x, const aligned_vector<T>& y) {
 }
 
 template <typename T>
-void saxpy(T, aligned_vector<T>&, const aligned_vector<T>&, const aligned_vector<T>&);
+void saxpy(T, std::vector<T>&, const std::vector<T>&, const std::vector<T>&);
 
 template <typename T>
-void avx_saxpy(T s, aligned_vector<T>& a, const aligned_vector<T>& x,
-	       const aligned_vector<T>& y) {
+void avx_saxpy(T s, std::vector<T>& a, const std::vector<T>& x,
+	       const std::vector<T>& y) {
   T* ap = a.data();
   const T* xp = x.data();
   const T* yp = y.data();
@@ -121,15 +121,31 @@ void avx_saxpy(T s, aligned_vector<T>& a, const aligned_vector<T>& x,
 }
 
 template <typename T>
-void saxpy(T s, aligned_vector<T>& a, const aligned_vector<T>& x,
-	   const aligned_vector<T>& y) {
-  for (std::size_t i = 0; i < a.size(); ++i) {
-    a[i] = s * a[i] * x[i] + y[i];
+void column_avx_saxpy(T s, std::vector<std::vector<T>>& a,
+		      const std::vector<std::vector<T>>& x,
+		      const std::vector<std::vector<T>>& y) {
+
+
+  if constexpr (std::is_same<T, double>::value) {
+    // Double
+  } else {
+    // Float
+
   }
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& os, const aligned_vector<T>& v) {
+void saxpy(T s, std::vector<T>& a, const std::vector<T>& x,
+	   const std::vector<T>& y) {
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    a[i] = s * a[i];
+    a[i] *= x[i];
+    a[i] += y[i];
+  }
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& os, const std::vector<T>& v) {
   os << "{ ";
   for (const auto& x : v) {
     os << x << ' ';
@@ -145,17 +161,17 @@ int main() {
   std::cout << "Using AVX\n";
 #endif
   using t = double;
-  const auto dim = 500;
-  const auto n = 10000;
+  const auto dim = 50000;
+  const auto n = 1000;
   const t s = 3.0;
-  std::vector<aligned_vector<t>> a1(n);
+  std::vector<std::vector<t>> a1(n);
   for (auto i = 0; i < n; ++i) {
     a1[i] = random_vector<t>(dim);
   }
-  std::vector<aligned_vector<t>> a2(a1);
+  std::vector<std::vector<t>> a2(a1);
 
-  std::vector<aligned_vector<t>> xs(n);
-  std::vector<aligned_vector<t>> ys(n);
+  std::vector<std::vector<t>> xs(n);
+  std::vector<std::vector<t>> ys(n);
   for (auto i = 0; i < n; ++i) {
     xs[i] = random_vector<t>(dim);
     ys[i] = random_vector<t>(dim);
